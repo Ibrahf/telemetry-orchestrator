@@ -1,0 +1,20 @@
+# Local infrastructure: Temporal dev server (with Web UI) and an MQTT broker.
+# Start:  docker compose up -d
+# Stop:   docker compose down
+#
+# The Temporal dev server keeps its state in memory: workflows survive worker
+# restarts, but restarting this container clears the workflow history.
+services:
+  temporal:
+    image: temporalio/temporal:latest
+    command: ["server", "start-dev", "--ip", "0.0.0.0"]
+    ports:
+      - "7233:7233"   # gRPC endpoint used by workers and clients
+      - "8233:8233"   # Temporal Web UI -> http://localhost:8233
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./infra/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro

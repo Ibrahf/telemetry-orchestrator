@@ -1,0 +1,5 @@
+temporalio>=1.7,<2
+paho-mqtt>=2.0,<3
+fastapi>=0.110
+uvicorn>=0.29
+pytest>=8
