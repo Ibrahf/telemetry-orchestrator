@@ -1,4 +1,8 @@
-"""SQLite persistence for batch results and the pending-review queue."""
+"""SQLite persistence for completed batch results.
+
+The pending-review queue is not stored here: it is queried from Temporal
+(see api.py), so it can never drift out of sync with the workflows.
+"""
 import json
 import os
 import sqlite3
@@ -17,13 +21,6 @@ CREATE TABLE IF NOT EXISTS batch_results (
     anomaly_count  INTEGER NOT NULL,
     payload        TEXT NOT NULL,
     stored_at      REAL NOT NULL
-);
-CREATE TABLE IF NOT EXISTS pending_reviews (
-    workflow_id    TEXT PRIMARY KEY,
-    batch_id       TEXT NOT NULL,
-    machine_id     TEXT NOT NULL,
-    anomaly_count  INTEGER NOT NULL,
-    created_at     REAL NOT NULL
 );
 """
 
@@ -48,26 +45,6 @@ def save_outcome(outcome: BatchOutcome, db_path: str = config.DB_PATH) -> None:
                 json.dumps(asdict(outcome)), time.time(),
             ),
         )
-
-
-def add_pending_review(workflow_id: str, batch_id: str, machine_id: str,
-                       anomaly_count: int, db_path: str = config.DB_PATH) -> None:
-    with connect(db_path) as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO pending_reviews VALUES (?, ?, ?, ?, ?)",
-            (workflow_id, batch_id, machine_id, anomaly_count, time.time()),
-        )
-
-
-def remove_pending_review(workflow_id: str, db_path: str = config.DB_PATH) -> None:
-    with connect(db_path) as conn:
-        conn.execute("DELETE FROM pending_reviews WHERE workflow_id = ?", (workflow_id,))
-
-
-def list_pending_reviews(db_path: str = config.DB_PATH) -> list[dict]:
-    with connect(db_path) as conn:
-        rows = conn.execute("SELECT * FROM pending_reviews ORDER BY created_at").fetchall()
-    return [dict(r) for r in rows]
 
 
 def list_results(limit: int = 50, db_path: str = config.DB_PATH) -> list[dict]:

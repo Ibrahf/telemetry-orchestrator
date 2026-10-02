@@ -65,22 +65,14 @@ def process_readings(readings: list[Reading]) -> ProcessResult:
 
 
 @activity.defn
-def request_review(workflow_id: str, batch_id: str, machine_id: str, anomaly_count: int) -> None:
-    """Put the batch on the review queue that operators see through the API."""
-    storage.add_pending_review(workflow_id, batch_id, machine_id, anomaly_count)
-    activity.logger.info("Batch %s awaiting review (%d anomalies)", batch_id, anomaly_count)
-
-
-@activity.defn
-def store_outcome(workflow_id: str, outcome: BatchOutcome) -> None:
+def store_outcome(outcome: BatchOutcome) -> None:
     """Persist the final result. Can be made to fail on purpose to demonstrate retries."""
     if random.random() < config.STORE_FAILURE_RATE:
         raise RuntimeError(
             f"Simulated database outage (attempt {activity.info().attempt})"
         )
     storage.save_outcome(outcome)
-    storage.remove_pending_review(workflow_id)
     activity.logger.info("Stored batch %s with status %s", outcome.batch_id, outcome.status)
 
 
-ALL_ACTIVITIES = [validate_batch, process_readings, request_review, store_outcome]
+ALL_ACTIVITIES = [validate_batch, process_readings, store_outcome]

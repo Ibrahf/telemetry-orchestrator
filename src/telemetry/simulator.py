@@ -8,11 +8,11 @@ Run:  python -m telemetry.simulator --machines 3 --interval 0.5
 import argparse
 import json
 import random
+import sys
 import time
 
-import paho.mqtt.client as mqtt
-
 from . import config
+from .mqtt_client import MQTTConnectionError, connect
 
 NORMAL = {
     "temperature_c": (55.0, 8.0),
@@ -43,9 +43,10 @@ def main() -> None:
     parser.add_argument("--bad-rate", type=float, default=0.05)
     args = parser.parse_args()
 
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="telemetry-simulator")
-    client.connect(config.MQTT_HOST, config.MQTT_PORT)
-    client.loop_start()
+    try:
+        client = connect("telemetry-simulator", config.SIMULATOR_MQTT_USER, config.SIMULATOR_MQTT_PASSWORD)
+    except MQTTConnectionError as exc:
+        sys.exit(f"Error: {exc}")
 
     machines = [f"machine-{i + 1:02d}" for i in range(args.machines)]
     print(f"Publishing for {machines} to {config.MQTT_HOST}:{config.MQTT_PORT} (Ctrl+C to stop)")

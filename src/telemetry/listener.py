@@ -11,11 +11,11 @@ import logging
 import uuid
 from collections import defaultdict
 
-import paho.mqtt.client as mqtt
 from temporalio.client import Client
 
 from . import config
 from .models import Batch, Reading
+from .mqtt_client import MQTTConnectionError, connect
 from .workflows import TelemetryBatchWorkflow
 
 log = logging.getLogger("listener")
@@ -41,15 +41,15 @@ async def main() -> None:
     def on_message(_client, _userdata, msg):
         loop.call_soon_threadsafe(queue.put_nowait, msg.payload)
 
-    def on_connect(client, _userdata, _flags, reason_code, _properties):
-        log.info("Connected to MQTT (%s); subscribing to %s", reason_code, config.MQTT_TOPIC)
-        client.subscribe(config.MQTT_TOPIC, qos=1)
-
-    mqttc = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="telemetry-listener")
-    mqttc.on_connect = on_connect
-    mqttc.on_message = on_message
-    mqttc.connect(config.MQTT_HOST, config.MQTT_PORT)
-    mqttc.loop_start()
+    try:
+        mqttc = connect(
+            "telemetry-listener", config.LISTENER_MQTT_USER, config.LISTENER_MQTT_PASSWORD,
+            subscribe=config.MQTT_TOPIC, on_message=on_message,
+        )
+    except MQTTConnectionError as exc:
+        log.error("%s", exc)
+        return
+    log.info("Connected to MQTT as '%s'; subscribed to %s", config.LISTENER_MQTT_USER, config.MQTT_TOPIC)
 
     buffers: dict[str, list[Reading]] = defaultdict(list)
     try:

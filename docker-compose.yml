@@ -7,7 +7,14 @@
 services:
   temporal:
     image: temporalio/temporal:latest
-    command: ["server", "start-dev", "--ip", "0.0.0.0"]
+    # Custom search attributes let the API find workflows awaiting review.
+    command:
+      - server
+      - start-dev
+      - --ip=0.0.0.0
+      - --search-attribute=ReviewStatus=Keyword
+      - --search-attribute=MachineId=Keyword
+      - --search-attribute=AnomalyCount=Int
     ports:
       - "7233:7233"   # gRPC endpoint used by workers and clients
       - "8233:8233"   # Temporal Web UI -> http://localhost:8233
@@ -16,5 +23,24 @@ services:
     image: eclipse-mosquitto:2
     ports:
       - "1883:1883"
+    environment:
+      SIMULATOR_MQTT_PASSWORD: ${SIMULATOR_MQTT_PASSWORD:?set SIMULATOR_MQTT_PASSWORD in .env}
+      LISTENER_MQTT_PASSWORD: ${LISTENER_MQTT_PASSWORD:?set LISTENER_MQTT_PASSWORD in .env}
     volumes:
       - ./infra/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./infra/mosquitto.acl:/mosquitto/config/mosquitto.acl:ro
+    # Build the password file from .env on every start (passwords are stored
+    # hashed), lock down file permissions, then start the broker.
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        # Files from a previous start are regenerated; mosquitto_passwd -c will not overwrite them.
+        rm -f /mosquitto/data/passwd /mosquitto/data/acl
+        mosquitto_passwd -c -b /mosquitto/data/passwd simulator "$$SIMULATOR_MQTT_PASSWORD"
+        mosquitto_passwd -b /mosquitto/data/passwd listener "$$LISTENER_MQTT_PASSWORD"
+        cp /mosquitto/config/mosquitto.acl /mosquitto/data/acl
+        chown mosquitto:mosquitto /mosquitto/data/passwd /mosquitto/data/acl
+        chmod 0700 /mosquitto/data/passwd /mosquitto/data/acl
+        exec mosquitto -c /mosquitto/config/mosquitto.conf

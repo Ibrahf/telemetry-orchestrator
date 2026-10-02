@@ -9,11 +9,11 @@ from datetime import timedelta
 from typing import Optional
 
 from temporalio import workflow
-from temporalio.common import RetryPolicy
+from temporalio.common import RetryPolicy, SearchAttributeKey
 
 with workflow.unsafe.imports_passed_through():
     from . import config
-    from .activities import process_readings, request_review, store_outcome, validate_batch
+    from .activities import process_readings, store_outcome, validate_batch
     from .models import Batch, BatchOutcome, ReviewDecision
 
 # Retry transient failures with exponential back-off, then give up.
@@ -24,6 +24,12 @@ DEFAULT_RETRY = RetryPolicy(
     maximum_attempts=6,
 )
 STEP_TIMEOUT = timedelta(seconds=30)
+
+# Search attributes (registered on the server, see docker-compose.yml). The
+# review queue is a query over these, so Temporal is its single source of truth.
+REVIEW_STATUS = SearchAttributeKey.for_keyword("ReviewStatus")  # pending/approved/rejected/timed_out
+MACHINE_ID = SearchAttributeKey.for_keyword("MachineId")
+ANOMALY_COUNT = SearchAttributeKey.for_int("AnomalyCount")
 
 
 @workflow.defn
@@ -59,11 +65,14 @@ class TelemetryBatchWorkflow:
 
         if processed.anomalies:
             self._status = "awaiting_review"
-            await workflow.execute_activity(
-                request_review,
-                args=[workflow.info().workflow_id, batch.batch_id,
-                      batch.machine_id, len(processed.anomalies)],
-                start_to_close_timeout=STEP_TIMEOUT, retry_policy=DEFAULT_RETRY,
+            workflow.upsert_search_attributes([
+                REVIEW_STATUS.value_set("pending"),
+                MACHINE_ID.value_set(batch.machine_id),
+                ANOMALY_COUNT.value_set(len(processed.anomalies)),
+            ])
+            workflow.logger.info(
+                "Batch %s from %s awaiting review (%d anomalies)",
+                batch.batch_id, batch.machine_id, len(processed.anomalies),
             )
             try:
                 # Durable wait: survives worker restarts and costs nothing while idle.
@@ -71,16 +80,19 @@ class TelemetryBatchWorkflow:
                     lambda: self._decision is not None,
                     timeout=timedelta(minutes=config.REVIEW_TIMEOUT_MINUTES),
                 )
+                review_status = "approved" if self._decision.approved else "rejected"
             except asyncio.TimeoutError:
                 self._decision = ReviewDecision(
                     approved=False, reviewer="system", note="review timed out"
                 )
+                review_status = "timed_out"
+            workflow.upsert_search_attributes([REVIEW_STATUS.value_set(review_status)])
             outcome.review = self._decision
             outcome.status = "approved" if self._decision.approved else "rejected"
 
         self._status = "storing"
         await workflow.execute_activity(
-            store_outcome, args=[workflow.info().workflow_id, outcome],
+            store_outcome, outcome,
             start_to_close_timeout=STEP_TIMEOUT, retry_policy=DEFAULT_RETRY,
         )
 
