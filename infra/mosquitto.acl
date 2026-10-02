@@ -1,0 +1,7 @@
+# Machines (the simulator) may only publish telemetry.
+user simulator
+topic write spBv1.0/#
+
+# The listener may only read telemetry.
+user listener
+topic read spBv1.0/#
